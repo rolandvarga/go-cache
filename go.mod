@@ -2,7 +2,10 @@ module github.com/rolandvarga/go-cache
 
 go 1.18
 
-require github.com/gin-gonic/gin v1.7.7
+require (
+	github.com/gin-gonic/gin v1.7.7
+	github.com/gofrs/uuid v4.2.0+incompatible
+)
 
 require (
 	github.com/gin-contrib/sse v0.1.0 // indirect
