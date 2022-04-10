@@ -1,32 +1,47 @@
 package main
 
 import (
+	"log"
+	"sync"
+	"time"
+
 	"github.com/gin-gonic/gin"
 	"github.com/gofrs/uuid"
 )
 
 type Service struct {
-	cache Cache
+	cache             Cache
+	evictionFrequency time.Duration
 }
 
 type Cache struct {
+	mu      sync.Mutex
 	Entries []Entry
 }
 
 type Entry struct {
-	UUID string `json:"uuid"`
-	TTL  int    `json:"ttl"`
-	Body string `json:"body"`
+	UUID      string    `json:"uuid"`
+	TTL       int       `json:"ttl"` // milliseconds
+	Body      string    `json:"body" binding:"required"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
-func (s *Service) add(new Entry) {
-	s.cache.Entries = append(s.cache.Entries, new)
+func (e *Entry) isExpired() bool {
+	return time.Now().UTC().After(e.CreatedAt.Add(time.Duration(e.TTL * int(time.Millisecond))))
 }
 
-func (s *Service) remove(this Entry) {
-	for idx, entry := range s.cache.Entries {
+func (c *Cache) add(new Entry) {
+	c.mu.Lock()
+	c.Entries = append(c.Entries, new)
+	c.mu.Unlock()
+}
+
+func (c *Cache) remove(this Entry) {
+	for idx, entry := range c.Entries {
 		if entry.UUID == this.UUID {
-			s.cache.Entries = append(s.cache.Entries[:idx], s.cache.Entries[idx+1:]...)
+			c.mu.Lock()
+			c.Entries = append(c.Entries[:idx], c.Entries[idx+1:]...)
+			c.mu.Unlock()
 		}
 	}
 }
@@ -44,15 +59,50 @@ func (s *Service) newEntryHandler(c *gin.Context) {
 		return
 	}
 
-	s.add(Entry{UUID: id.String(), TTL: 1000, Body: ""})
+	var entry Entry
+	err = c.BindJSON(&entry)
+	if err != nil {
+		c.JSON(400, gin.H{"error": "bad request"})
+		log.Println(err)
+		return
+	}
+
+	ttl := 10000 // default value
+	if entry.TTL > 0 {
+		ttl = entry.TTL
+	}
+	s.cache.add(newEntry(id.String(), ttl, entry.Body))
 
 	c.JSON(200, gin.H{
 		"uuid": id.String(),
 	})
 }
 
+func (s *Service) expireEntries(expiredCh chan int) {
+	t := time.NewTicker(s.evictionFrequency * time.Second)
+	defer t.Stop()
+
+	for {
+		select {
+		case <-t.C:
+			count := 0
+			for _, entry := range s.cache.Entries {
+				if entry.isExpired() {
+					s.cache.remove(entry)
+					count++
+				}
+			}
+			expiredCh <- count
+		}
+	}
+}
+
+func newEntry(uuid string, ttl int, body string) Entry {
+	return Entry{UUID: uuid, TTL: ttl, Body: body, CreatedAt: time.Now().UTC()}
+}
+
 func newService() *Service {
-	return &Service{cache: Cache{}}
+	return &Service{cache: Cache{}, evictionFrequency: time.Duration(10)}
 }
 
 func main() {
@@ -60,30 +110,23 @@ func main() {
 
 	svc := newService()
 
-	// go doEvery(10*time.Second, evictExpired)
-
 	r.GET("/entries", svc.entriesHandler)
 	r.POST("/new", svc.newEntryHandler)
+
+	expiredCh := make(chan int)
+	go svc.expireEntries(expiredCh)
+
+	go func() {
+		for {
+			select {
+			case expirecount := <-expiredCh:
+				log.Printf("expired '%d' entries", expirecount)
+			}
+		}
+	}()
 
 	err := r.Run("localhost:8080")
 	if err != nil {
 		panic(err)
 	}
 }
-
-// ----------------------
-
-// func doEvery(d time.Duration, f func(time.Time)) {
-// 	for x := range time.Tick(d) {
-// 		f(x)
-// 	}
-// }
-
-// func evictExpired(now time.Time) {
-// 	fmt.Printf("evicting expired entries at %v", now)
-// 	for idx, entry := range localCache.Entries {
-// 		if entry.TTL == 0 {
-// 			localCache.Entries = append(localCache.Entries[:idx], localCache.Entries[idx+1:]...)
-// 		}
-// 	}
-// }
