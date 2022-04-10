@@ -11,7 +11,7 @@ func testServiceWith(entries []Entry) *Service {
 	return s
 }
 
-func TestServiceAddEntry(t *testing.T) {
+func TestCacheAddEntry(t *testing.T) {
 	t.Parallel()
 	cases := map[string]struct {
 		entries []Entry
@@ -45,7 +45,7 @@ func TestServiceAddEntry(t *testing.T) {
 			t.Parallel()
 			s := testServiceWith(c.entries)
 
-			s.add(c.this)
+			s.cache.add(c.this)
 			if !reflect.DeepEqual(s.cache.Entries, c.want) {
 				t.Errorf("have '%v' want '%v'", s.cache.Entries, c.want)
 			}
@@ -53,7 +53,7 @@ func TestServiceAddEntry(t *testing.T) {
 	}
 }
 
-func TestServiceRemoveEntry(t *testing.T) {
+func TestCacheRemoveEntry(t *testing.T) {
 	t.Parallel()
 	cases := map[string]struct {
 		entries []Entry
@@ -118,7 +118,7 @@ func TestServiceRemoveEntry(t *testing.T) {
 			t.Parallel()
 			s := testServiceWith(c.entries)
 
-			s.remove(c.this)
+			s.cache.remove(c.this)
 			if !reflect.DeepEqual(s.cache.Entries, c.want) {
 				t.Errorf("have '%v' want '%v'", s.cache.Entries, c.want)
 			}
